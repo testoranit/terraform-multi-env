@@ -7,11 +7,13 @@ on:
       - qa
       - main
   pull_request:
+  workflow_dispatch:
 
 jobs:
   terraform:
     name: Terraform Plan and Apply
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'qa' && 'qa' || 'dev' }}
     env:
       TF_LOG: INFO
 
@@ -24,7 +26,14 @@ jobs:
         with:
           terraform_version: 1.5.7
 
-      - name: Determine environment
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Determine environment directory
         id: env
         run: |
           BRANCH_NAME=${GITHUB_REF##*/}
@@ -38,7 +47,6 @@ jobs:
           else
             echo "Unsupported branch: $BRANCH_NAME"
             exit 1
-          fi
 
       - name: Terraform Init
         run: terraform -chdir=${{ steps.env.outputs.env_dir }} init
@@ -46,6 +54,10 @@ jobs:
       - name: Terraform Plan
         run: terraform -chdir=${{ steps.env.outputs.env_dir }} plan -out=tfplan
 
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/qa' || github.ref == 'refs/heads/main'
+      - name: Terraform Apply (Dev Only)
+        if: github.ref == 'refs/heads/dev'
+        run: terraform -chdir=${{ steps.env.outputs.env_dir }} apply -auto-approve tfplan
+
+      - name: Terraform Apply (QA and Prod with Approval)
+        if: github.ref == 'refs/heads/qa' || github.ref == 'refs/heads/main'
         run: terraform -chdir=${{ steps.env.outputs.env_dir }} apply -auto-approve tfplan

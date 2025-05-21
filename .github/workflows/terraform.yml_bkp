@@ -1,0 +1,51 @@
+name: Terraform CI/CD
+
+on:
+  push:
+    branches:
+      - dev
+      - qa
+      - main
+  pull_request:
+
+jobs:
+  terraform:
+    name: Terraform Plan and Apply
+    runs-on: ubuntu-latest
+    env:
+      TF_LOG: INFO
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Determine environment
+        id: env
+        run: |
+          BRANCH_NAME=${GITHUB_REF##*/}
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          if [[ "$BRANCH_NAME" == "dev" ]]; then
+            echo "env_dir=environments/dev" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH_NAME" == "qa" ]]; then
+            echo "env_dir=environments/qa" >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "env_dir=environments/prod" >> $GITHUB_OUTPUT
+          else
+            echo "Unsupported branch: $BRANCH_NAME"
+            exit 1
+          fi
+
+      - name: Terraform Init
+        run: terraform -chdir=${{ steps.env.outputs.env_dir }} init
+
+      - name: Terraform Plan
+        run: terraform -chdir=${{ steps.env.outputs.env_dir }} plan -out=tfplan
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/qa' || github.ref == 'refs/heads/main'
+        run: terraform -chdir=${{ steps.env.outputs.env_dir }} apply -auto-approve tfplan
